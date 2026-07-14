@@ -1,0 +1,18 @@
+# ===== model stack — "ต้องตรงเป๊ะ" กับ requirements.txt หลัก =====
+# โมเดลถูก pickle มาจาก image เทรนที่ใช้เวอร์ชันพวกนี้ — ต่างกัน = โหลดพัง/ผลเพี้ยน
+numpy==2.2.6
+pandas==2.3.3
+scikit-learn==1.7.2
+lightgbm==4.6.0
+xgboost==3.2.0
+cloudpickle==3.1.2
+mlflow==3.14.0
+
+# src/config.py ถูก import โดย src/preprocess.py (ซึ่งฝังอยู่ใน pickle ของโมเดล)
+pydantic-settings==2.14.2
+# ให้ mlflow โหลด artifact จาก gs:// ได้
+google-cloud-storage>=2.19
+
+# ===== web layer — pin หลวมได้ (ไม่เกี่ยวกับ pickle) =====
+fastapi==0.139.0
+uvicorn[standard]>=0.30,<1

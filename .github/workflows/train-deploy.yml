@@ -1,0 +1,241 @@
+# Pipeline หลัก: build → train (Vertex) → gate → promote → deploy
+#
+# โครงสร้าง job ถูกออกแบบให้ "ลำดับความปลอดภัย" ถูกบังคับโดย needs: chain
+#   gate    needs train    → ไม่มีโมเดลใหม่ = ไม่มีอะไรให้ตรวจ
+#   promote needs gate     → โมเดลที่ไม่ผ่านเทสต์บนข้อมูลจริง "ไม่มีทาง" ขึ้น champion
+#   deploy  needs promote  → และ deploy เฉพาะเมื่อ promote จริง (if: promoted == 'true')
+# ถ้า job ใด fail ทุกอย่างข้างหลังหยุดหมด — champion เดิม + API เดิมไม่ถูกแตะ
+name: train-gate-promote-deploy
+
+on:
+  workflow_dispatch: {}        # กดรันเองได้จากแท็บ Actions
+  push:
+    branches: [main]
+    paths:                     # push ที่กระทบ "โมเดล" เท่านั้นถึงจะเทรนใหม่
+      - "src/**"
+      - "requirements.txt"
+      - "docker/train.Dockerfile"
+      - ".github/workflows/train-deploy.yml"
+
+# aliases (@champion/@challenger) เป็น shared state — ห้ามให้ 2 pipeline แข่งกันย้าย
+concurrency:
+  group: secom-train-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write              # จำเป็นสำหรับ Workload Identity Federation
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  BUCKET: ${{ vars.GCS_BUCKET }}
+  IMAGE_TRAIN: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/secom/train:${{ github.sha }}
+  IMAGE_API: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/secom/api:${{ github.sha }}
+  # ตัวเดียวกันสองชื่อ: SECOM_* ให้โค้ดเรา (pydantic settings), MLFLOW_* ให้ mlflow CLI/lib ตรง ๆ
+  SECOM_MLFLOW_URI: ${{ vars.MLFLOW_URL }}
+  MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_URL }}
+  SECOM_DATA_DIR: gs://${{ vars.GCS_BUCKET }}/data
+
+jobs:
+  # ── 1) build & push training image ──────────────────────────────────────
+  build-train-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+
+      - name: Configure docker for Artifact Registry
+        run: gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
+
+      - name: Build & push
+        run: |
+          docker build -f docker/train.Dockerfile -t "$IMAGE_TRAIN" .
+          docker push "$IMAGE_TRAIN"
+
+  # ── 2) เทรนบน Vertex AI (ไม่ใช่บน runner — CI มีหน้าที่สั่งงาน ไม่ใช่ออกแรง) ──
+  train:
+    needs: build-train-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+
+      - name: Submit Vertex AI custom job แล้วรอจนจบ
+        run: |
+          cat > /tmp/job.yaml <<EOF
+          workerPoolSpecs:
+            - machineSpec:
+                machineType: e2-standard-4
+              replicaCount: 1
+              containerSpec:
+                imageUri: ${IMAGE_TRAIN}
+                args: ["--register"]
+                env:
+                  - name: SECOM_MLFLOW_URI
+                    value: ${SECOM_MLFLOW_URI}
+                  - name: SECOM_DATA_DIR
+                    value: ${SECOM_DATA_DIR}
+                  - name: GIT_SHA
+                    value: ${GITHUB_SHA}
+          serviceAccount: vertex-train@${PROJECT_ID}.iam.gserviceaccount.com
+          EOF
+          JOB=$(gcloud ai custom-jobs create \
+            --region="$REGION" \
+            --display-name="secom-train-${GITHUB_SHA:0:7}" \
+            --config=/tmp/job.yaml \
+            --format='value(name)')
+          echo "job: $JOB"
+          # stream-logs จะ block จนกว่า job จบ → เห็น log เทรนใน Actions เลย
+          gcloud ai custom-jobs stream-logs "$JOB" --region="$REGION"
+          STATE=$(gcloud ai custom-jobs describe "$JOB" --region="$REGION" --format='value(state)')
+          echo "final state: $STATE"
+          test "$STATE" = "JOB_STATE_SUCCEEDED"
+
+  # ── 3) MODEL GATE — unit test บนข้อมูลจริง (ความต้องการข้อ 2) ────────────
+  gate:
+    needs: train
+    runs-on: ubuntu-latest
+    outputs:
+      challenger_version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # auth รอบแรก: Application Default Credentials → gcsfs อ่าน dataset จาก GCS ได้
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+
+      # auth รอบสอง: mint "ID token" (audience = MLflow URL) สำหรับผ่าน IAM ของ Cloud Run
+      - id: mlflow-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ vars.MLFLOW_URL }}
+          id_token_include_email: true
+      - run: echo "MLFLOW_TRACKING_TOKEN=${{ steps.mlflow-auth.outputs.id_token }}" >> "$GITHUB_ENV"
+
+      # pin เลข version ของ @challenger ตั้งแต่ตรงนี้ — jobs ถัดไปใช้เลขนี้เท่านั้น
+      - id: resolve
+        run: python -m scripts.resolve_version challenger
+
+      - name: Model gate (pytest บนข้อมูลจริง ทั้ง label ดีและเสีย)
+        env:
+          MODEL_URI: models:/secom-fault/${{ steps.resolve.outputs.version }}
+        run: pytest tests/gate -m gate -v
+
+  # ── 4) champion vs challenger (ความต้องการข้อ 1) ────────────────────────
+  promote:
+    needs: gate
+    runs-on: ubuntu-latest
+    outputs:
+      promoted: ${{ steps.promote.outputs.promoted }}
+      champion_version: ${{ steps.promote.outputs.champion_version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+      - id: mlflow-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ vars.MLFLOW_URL }}
+          id_token_include_email: true
+      - run: echo "MLFLOW_TRACKING_TOKEN=${{ steps.mlflow-auth.outputs.id_token }}" >> "$GITHUB_ENV"
+
+      - id: promote
+        run: python -m src.promote --challenger-version "${{ needs.gate.outputs.challenger_version }}"
+
+  # ── 5) deploy API — เฉพาะเมื่อได้ champion ตัวใหม่เท่านั้น ────────────────
+  deploy-api:
+    needs: promote
+    if: needs.promote.outputs.promoted == 'true'
+    runs-on: ubuntu-latest
+    env:
+      V: ${{ needs.promote.outputs.champion_version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+      - id: mlflow-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ vars.MLFLOW_URL }}
+          id_token_include_email: true
+      - run: echo "MLFLOW_TRACKING_TOKEN=${{ steps.mlflow-auth.outputs.id_token }}" >> "$GITHUB_ENV"
+
+      # release bundle: ดึงโมเดลจาก MLflow แล้ววางที่ path ตายตัวใน GCS
+      # → API ไม่ต้องพึ่ง MLflow ตอน runtime และ 1 version = 1 path ถาวร (immutable)
+      - name: Publish release bundle to GCS
+        run: |
+          MODEL_DIR=$(python -c "import mlflow; print(mlflow.artifacts.download_artifacts('models:/secom-fault/${V}', dst_path='bundle'))")
+          echo "downloaded to: $MODEL_DIR"
+          gcloud storage rsync --recursive "$MODEL_DIR" "gs://${BUCKET}/releases/secom-fault/v${V}/model"
+
+      - name: Build & push API image
+        run: |
+          gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
+          docker build -f docker/api.Dockerfile -t "$IMAGE_API" .
+          docker push "$IMAGE_API"
+
+      # --allow-unauthenticated เพื่อให้เดโม่/ตรวจงานง่าย — งานจริงควรปิดแล้วคุมด้วย IAM
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy secom-api \
+            --image "$IMAGE_API" \
+            --region "$REGION" \
+            --service-account "secom-api-run@${PROJECT_ID}.iam.gserviceaccount.com" \
+            --allow-unauthenticated \
+            --memory 1Gi --cpu 1 --max-instances 3 \
+            --set-env-vars "MODEL_URI=gs://${BUCKET}/releases/secom-fault/v${V}/model,MODEL_VERSION=${V}"
+
+      # deployment verification: ยิงของจริงใส่ API ที่เพิ่ง deploy
+      # เช็คว่า (1) ตอบ (2) รัน "โมเดล version ที่เราตั้งใจ deploy" จริง ๆ
+      - name: Smoke test
+        run: |
+          URL=$(gcloud run services describe secom-api --region "$REGION" --format='value(status.url)')
+          echo "service: $URL"
+          curl -sf "$URL/health" | python -c "
+          import json, os, sys
+          h = json.load(sys.stdin)
+          assert h['model_version'] == os.environ['V'], f'expected v{os.environ[\"V\"]} got {h}'
+          print('health ok:', h)
+          "
+          python -c "import json; print(json.dumps({'instances': [[None]*590]}))" > /tmp/req.json
+          curl -sf -X POST -H 'Content-Type: application/json' -d @/tmp/req.json "$URL/predict"

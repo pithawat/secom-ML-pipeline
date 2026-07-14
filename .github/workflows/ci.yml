@@ -1,0 +1,30 @@
+# CI พื้นฐาน: lint + unit tests — รันเร็ว ไม่แตะ cloud เลย
+# ทำหน้าที่จับบั๊กโค้ดก่อนที่ pipeline ใหญ่ (train-deploy) จะเปลืองเงิน/เวลา cloud
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint-and-unit-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint(ruff)
+        run: ruff check src api scripts tests
+
+      - name: Unit test (ไม่รวม gate — gate ต้องมีโมเดลจริง)
+        run: pytest -m "not gate"
+        

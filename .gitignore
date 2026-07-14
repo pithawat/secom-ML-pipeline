@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# ของ MLflow "local dev" เท่านั้น — state จริงอยู่ Cloud SQL + GCS
+mlflow.db
+mlartifacts/
+mlruns/
+
+# dataset: source of truth คือ gs://<bucket>/data (ไม่ versioning ไฟล์ใหญ่ใน git)
+secom/*.data
+
+# secrets / ของชั่วคราว
+.env
+bundle/

@@ -1,0 +1,16 @@
+# กันของที่ไม่เกี่ยวหลุดเข้า image (ทั้งเรื่องขนาดและความปลอดภัย)
+.venv/
+.git/
+.github/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+mlflow.db
+mlartifacts/
+mlruns/
+secom/
+tests/
+bundle/
+.env
+README.md
