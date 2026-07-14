@@ -7,5 +7,6 @@ FROM ghcr.io/mlflow/mlflow:v3.14.0
 RUN pip install --no-cache-dir psycopg2-binary==2.9.10 google-cloud-storage
 
 COPY entrypoint.sh /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh  
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
