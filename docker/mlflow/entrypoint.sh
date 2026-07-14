@@ -10,4 +10,4 @@ exec mlflow server \
     --port "${PORT:-8080}" \
     --backend-store-uri "postgresql+psycopg2://${DB_USER}:${DB_PASS}@/${DB_NAME}?host=/cloudsql/${CLOUDSQL_INSTANCE}" \
     --artifacts-destination "${ARTIFACT_ROOT}" \
-    --workers 2
+    --workers 1
