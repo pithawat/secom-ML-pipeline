@@ -1514,7 +1514,14 @@ exec mlflow server \
   --port "${PORT:-8080}" \
   --backend-store-uri "postgresql+psycopg2://${DB_USER}:${DB_PASS}@/${DB_NAME}?host=/cloudsql/${CLOUDSQL_INSTANCE}" \
   --artifacts-destination "${ARTIFACT_ROOT}" \
+  --allowed-hosts "${MLFLOW_SERVER_ALLOWED_HOSTS:-*.run.app,localhost,localhost:*,127.0.0.1}" \
   --workers 2
+
+# --allowed-hosts จำเป็น เพราะ MLflow 3.x เปิด DNS-rebinding protection:
+# default รับแค่ Host header = localhost/private-IP → โดเมน Cloud Run (*.run.app)
+# โดนปฏิเสธด้วย "Invalid Host header" ทั้ง UI และ "ทุก REST call จากไปป์ไลน์"
+# (train/promote/gate ก็ยิงผ่าน run.app เหมือนกัน) — override เพิ่มได้ผ่าน env
+# MLFLOW_SERVER_ALLOWED_HOSTS ถ้าอยากล็อกให้แคบกว่า *.run.app
 ```
 
 ### 5.9 GitHub Actions workflows
@@ -2083,6 +2090,8 @@ pytest -m "not gate"
 |---|---|
 | `pip install -r requirements.txt` ใน Docker ล้มด้วย error แปลก ๆ (invalid requirement, null bytes) | ไฟล์เป็น UTF-16 — ต้องเขียน requirements ใหม่เป็น UTF-8 (§4.1) |
 | MLflow ตอบ **401/403** | (1) SA ที่เรียกยังไม่ได้ `roles/run.invoker` บน `secom-mlflow` (2) token audience ไม่ตรงกับ URL ของ service (3) token หมดอายุ (>1 ชม.) — `ensure_mlflow_auth()` ต่ออายุให้เฉพาะบน GCP; บนเครื่องต้อง mint ใหม่เอง |
+| **`Invalid Host header - possible DNS rebinding attack detected`** | MLflow 3.x เปิด DNS-rebinding protection รับแค่ `localhost`/private-IP เป็น default → โดเมน `run.app` โดนปฏิเสธ (กระทบทั้ง UI **และทุก REST call จากไปป์ไลน์**) แก้: entrypoint ใส่ `--allowed-hosts` ให้แล้ว (§5.8); ถ้า service เก่ายังไม่มี ให้ hotfix ทันทีไม่ต้อง rebuild: `gcloud run services update secom-mlflow --region $REGION --update-env-vars '^@^MLFLOW_SERVER_ALLOWED_HOSTS=*.run.app,localhost,localhost:*,127.0.0.1'` |
+| container fail to start ครั้งแรก ๆ แล้วมาสำเร็จตอน retry | ปกติของ first deploy: MLflow รัน DB migration บน Cloud SQL ที่เพิ่งตื่น อาจเกิน startup timeout — retry แล้วขึ้นเองได้ ถ้าเจอซ้ำ ๆ เพิ่ม `--timeout=600` ตอน deploy |
 | โหลดโมเดลแล้ว `ModuleNotFoundError: No module named 'src'` (หรือ `preprocess`) | pickle อ้าง module path ตอนเทรน — ต้องเทรนด้วย `python -m src.train` จาก root เสมอ (ห้าม `cd src`) และ image ที่โหลดโมเดลต้องมี `src/` (§4 หัวข้อเตือน) |
 | `gcloud builds submit` push image ไม่ได้ (permission denied) | โปรเจกต์ใหม่ ๆ Cloud Build ใช้ compute default SA: `gcloud projects add-iam-policy-binding $PROJECT_ID --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" --role=roles/artifactregistry.writer` (+ `roles/logging.logWriter` ถ้าฟ้องเรื่อง log) |
 | MLflow ต่อ Cloud SQL ไม่ได้ | เช็ค `--add-cloudsql-instances` ตอน deploy, SA มี `roles/cloudsql.client`, และชื่อ `CLOUDSQL_INSTANCE` เป็นรูป `project:region:instance` |
