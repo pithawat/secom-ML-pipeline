@@ -18,6 +18,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ src/
 
 ENV PYTHONUNBUFFERED=1
+# container ไม่มี git → mlflow autolog พยายามอ่าน git SHA แล้ว spam warning ยาว ๆ
+# เรา capture git_sha ผ่าน env GIT_SHA เองอยู่แล้ว (ดู _git_sha) → ปิด mlflow git ให้เงียบ
+ENV GIT_PYTHON_REFRESH=quiet
 
 # รันเป็น module จาก /app เสมอ → pickle อ้างคลาสเป็น src.preprocess.* (ดู README §4)
 ENTRYPOINT ["python", "-m", "src.train"]

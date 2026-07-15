@@ -605,6 +605,9 @@ def train_all(register: bool = False) -> dict:
             info = mlflow.sklearn.log_model(
                 pipe,
                 name="model",
+                # MLflow 3.x เปลี่ยน default เป็น "skops" ซึ่ง serialize custom class
+                # (SimplePreprocessor ของเรา) ไม่ได้ → ต้องบังคับ cloudpickle
+                serialization_format="cloudpickle",
                 # signature + input_example = สัญญา (contract) ของ input:
                 # 590 คอลัมน์ float มี NaN ได้ — คนโหลดโมเดลไปใช้เห็นทันทีว่าต้องป้อนอะไร
                 signature=infer_signature(X_test.head(5), proba[:5]),
@@ -1456,6 +1459,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ src/
 
 ENV PYTHONUNBUFFERED=1
+# container ไม่มี git → mlflow autolog พยายามอ่าน git SHA แล้ว spam warning ยาว ๆ
+# เรา capture git_sha ผ่าน env GIT_SHA เองอยู่แล้ว (ดู _git_sha) → ปิด mlflow git ให้เงียบ
+ENV GIT_PYTHON_REFRESH=quiet
 
 # รันเป็น module จาก /app เสมอ → pickle อ้างคลาสเป็น src.preprocess.* (ดู README §4)
 ENTRYPOINT ["python", "-m", "src.train"]

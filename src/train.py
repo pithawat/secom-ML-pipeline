@@ -63,6 +63,9 @@ def train_all(register: bool = False) -> dict:
             info = mlflow.sklearn.log_model(
                 pipe,
                 name="model",
+                # MLflow 3.x เปลี่ยน default เป็น "skops" ซึ่ง serialize custom class
+                # (SimplePreprocessor ของเรา) ไม่ได้ → ต้องบังคับ cloudpickle
+                serialization_format="cloudpickle",
                 # signature + input_example = สัญญา (contract) ของ input:
                 # 590 คอลัมน์ float มี NaN ได้ — คนโหลดโมเดลไปใช้เห็นทันทีว่าต้องป้อนอะไร
                 signature=infer_signature(X_test.head(5), proba[:5]),
