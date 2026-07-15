@@ -11,4 +11,10 @@ exec mlflow server \
     --backend-store-uri "postgresql+psycopg2://${DB_USER}:${DB_PASS}@/${DB_NAME}?host=/cloudsql/${CLOUDSQL_INSTANCE}" \
     --artifacts-destination "${ARTIFACT_ROOT}" \
     --allowed-hosts "${MLFLOW_SERVER_ALLOWED_HOSTS:-*.run.app,localhost,localhost:*,127.0.0.1}" \
+    --cors-allowed-origins "${MLFLOW_SERVER_CORS_ALLOWED_ORIGINS:-*}" \
     --workers 1
+
+# --cors-allowed-origins จำเป็นเพราะ MLflow 3.5+ บล็อก cross-origin API ทุก ajax path
+# → UI (React) โหลด experiment ไม่ได้ ("Cross-origin request blocked") ถ้าไม่ allow origin
+# CORS ไม่รองรับ wildcard subdomain (*.run.app ใช้ไม่ได้เหมือน allowed-hosts) → default เป็น *
+# override ให้แคบได้ผ่าน env MLFLOW_SERVER_CORS_ALLOWED_ORIGINS (comma-list ของ origin เต็ม)

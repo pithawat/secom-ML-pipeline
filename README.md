@@ -1526,6 +1526,7 @@ exec mlflow server \
   --backend-store-uri "postgresql+psycopg2://${DB_USER}:${DB_PASS}@/${DB_NAME}?host=/cloudsql/${CLOUDSQL_INSTANCE}" \
   --artifacts-destination "${ARTIFACT_ROOT}" \
   --allowed-hosts "${MLFLOW_SERVER_ALLOWED_HOSTS:-*.run.app,localhost,localhost:*,127.0.0.1}" \
+  --cors-allowed-origins "${MLFLOW_SERVER_CORS_ALLOWED_ORIGINS:-*}" \
   --workers 2
 
 # --allowed-hosts จำเป็น เพราะ MLflow 3.x เปิด DNS-rebinding protection:
@@ -1533,6 +1534,11 @@ exec mlflow server \
 # โดนปฏิเสธด้วย "Invalid Host header" ทั้ง UI และ "ทุก REST call จากไปป์ไลน์"
 # (train/promote/gate ก็ยิงผ่าน run.app เหมือนกัน) — override เพิ่มได้ผ่าน env
 # MLFLOW_SERVER_ALLOWED_HOSTS ถ้าอยากล็อกให้แคบกว่า *.run.app
+#
+# --cors-allowed-origins จำเป็นเพราะ MLflow 3.5+ บล็อก cross-origin API ทุก ajax path
+# → UI (React) โหลด experiment ไม่ได้ ("Cross-origin request blocked") ถ้าไม่ allow origin
+# CORS ไม่รองรับ wildcard subdomain (*.run.app ใช้ไม่ได้เหมือน allowed-hosts) → default *
+# override ให้แคบได้ผ่าน env MLFLOW_SERVER_CORS_ALLOWED_ORIGINS (comma-list ของ origin เต็ม)
 ```
 
 ### 5.9 GitHub Actions workflows
@@ -2108,6 +2114,7 @@ pytest -m "not gate"
 | `pip install -r requirements.txt` ใน Docker ล้มด้วย error แปลก ๆ (invalid requirement, null bytes) | ไฟล์เป็น UTF-16 — ต้องเขียน requirements ใหม่เป็น UTF-8 (§4.1) |
 | MLflow ตอบ **401/403** | (1) SA ที่เรียกยังไม่ได้ `roles/run.invoker` บน `secom-mlflow` (2) token audience ไม่ตรงกับ URL ของ service (3) token หมดอายุ (>1 ชม.) — `ensure_mlflow_auth()` ต่ออายุให้เฉพาะบน GCP; บนเครื่องต้อง mint ใหม่เอง |
 | **`Invalid IAP credentials: Invalid bearer token. Invalid JWT audience.`** | audience ของ ID token ต้องมี **trailing slash** เป๊ะ (`https://service.run.app/`) ตาม [Cloud Run docs](https://docs.cloud.google.com/run/docs/authenticating/service-to-service) — แม้ audience จะ "ดูเหมือน" ตรงกับ service URL ทุกตัวอักษร (เทียบด้วยตาแล้วเหมือนกัน) แต่ถ้าไม่มี `/` ท้ายจะโดนปฏิเสธเงียบ ๆ ด้วย error นี้เสมอ แก้แล้วใน `gcp_auth.py` (`.rstrip("/") + "/"`) และ workflow (`id_token_audience: ${{ vars.MLFLOW_URL }}/`) — ถ้าเพิ่ม auth pathใหม่ที่ไหนอย่าลืม trailing slash ด้วย |
+| UI MLflow เปิดได้แต่โหลด experiment ไม่ขึ้น / **`Cross-origin request blocked`** | MLflow 3.5+ บล็อก cross-origin API (คนละชั้นกับ allowed-hosts) — entrypoint ใส่ `--cors-allowed-origins` ให้แล้ว (§5.8); service เก่า hotfix ทันทีไม่ต้อง rebuild: `gcloud run services update secom-mlflow --region $REGION --update-env-vars 'MLFLOW_SERVER_CORS_ALLOWED_ORIGINS=*'` (CORS ไม่รองรับ `*.run.app` — ใช้ `*` หรือ origin เต็ม) |
 | **`Invalid Host header - possible DNS rebinding attack detected`** | MLflow 3.x เปิด DNS-rebinding protection รับแค่ `localhost`/private-IP เป็น default → โดเมน `run.app` โดนปฏิเสธ (กระทบทั้ง UI **และทุก REST call จากไปป์ไลน์**) แก้: entrypoint ใส่ `--allowed-hosts` ให้แล้ว (§5.8); ถ้า service เก่ายังไม่มี ให้ hotfix ทันทีไม่ต้อง rebuild: `gcloud run services update secom-mlflow --region $REGION --update-env-vars '^@^MLFLOW_SERVER_ALLOWED_HOSTS=*.run.app,localhost,localhost:*,127.0.0.1'` |
 | container fail to start ครั้งแรก ๆ แล้วมาสำเร็จตอน retry | ปกติของ first deploy: MLflow รัน DB migration บน Cloud SQL ที่เพิ่งตื่น อาจเกิน startup timeout — retry แล้วขึ้นเองได้ ถ้าเจอซ้ำ ๆ เพิ่ม `--timeout=600` ตอน deploy |
 | โหลดโมเดลแล้ว `ModuleNotFoundError: No module named 'src'` (หรือ `preprocess`) | pickle อ้าง module path ตอนเทรน — ต้องเทรนด้วย `python -m src.train` จาก root เสมอ (ห้าม `cd src`) และ image ที่โหลดโมเดลต้องมี `src/` (§4 หัวข้อเตือน) |
