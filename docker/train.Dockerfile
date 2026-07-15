@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ src/
 
-ENV PYTHONBUFFERED=1
+ENV PYTHONUNBUFFERED=1
 
 # รันเป็น module จาก /app เสมอ → pickle อ้างคลาสเป็น src.preprocess.* (ดู README §4)
 ENTRYPOINT ["python", "-m", "src.train"]

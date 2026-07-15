@@ -15,6 +15,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ src/
 COPY api/ api/
 
-ENV PYTHONBUFFERED=1
+ENV PYTHONUNBUFFERED=1
 
-CMD exec uvicorn api.main:app --host 0.0.0.0 --port ${PORT:8080}
+# Cloud Run ส่ง PORT มาให้ (default 8080) — ต้องใช้ ${PORT:-8080} (ไม่ใช่ ${PORT:8080}
+# ซึ่งเป็น substring expansion คนละความหมาย และพังถ้า PORT ไม่ได้ตั้ง)
+CMD exec uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8080}

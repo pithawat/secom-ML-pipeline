@@ -90,7 +90,7 @@ def test_passes_real_good_lots(proba, holdout):
     good_mask = y == 0
     assert good_mask.sum() >= 50, "test window ต้องมีชิ้นงานดีพอให้ประเมิน"
     specificity =float((proba[good_mask] < settings.decision_threshold).mean())
-    assert specificity >= settings.gate_min_specifically, (
+    assert specificity >= settings.gate_min_specificity, (
         f"ทายชิ้นงานดีถูกแค่ {specificity:.2%} "
         f"(floor={settings.gate_min_specificity:.0%})"
     )

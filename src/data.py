@@ -11,8 +11,10 @@ def load_raw(
         labels_path: Path | str | None = None,
 ) -> tuple[pd.DataFrame, pd.Series]:
     
-    data_path = Path(data_path or settings.data_file)
-    labels_path = Path(labels_path or settings.labels_file)
+    # str() ไม่ใช่ Path() — Path("gs://bucket/x") จะ normalize เหลือ "gs:/bucket/x"
+    # (ตัด // เหลือ /) ทำให้ gcsfs หา path ไม่เจอตอนรันบน cloud (SECOM_DATA_DIR=gs://...)
+    data_path = str(data_path or settings.data_file)
+    labels_path = str(labels_path or settings.labels_file)
 
     X = pd.read_csv(data_path, sep=r"\s+", header=None)
 

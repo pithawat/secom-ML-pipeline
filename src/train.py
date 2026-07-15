@@ -13,16 +13,13 @@ from src.models import LOGGED_PARAMS
 from src.data import load_raw, data_fingerprint, chronological_split
 from src.models import make_models
 from src.evaluate import compute_metrics, predict_positive_proba
+from src.gcp_auth import configure_mlflow
 
 def build_pipeline(model) -> Pipeline:
     return Pipeline([
-        ("pre", SimplePreprocessor()), 
+        ("pre", SimplePreprocessor()),
          ("clf", model)
          ])
-
-def _setup_mlflow() -> None:
-    mlflow.set_tracking_uri(settings.mlflow_uri)
-    mlflow.set_experiment(settings.experiment)
 
 def _log_params(model) -> None:
     if hasattr(model, "get_params"):
@@ -40,49 +37,12 @@ def _git_sha() -> str:
         return out.strip()[:12]
     except Exception:
         return "unknown"
-    
-# def train_all(register: bool = False) -> dict:
-    
-#     X, y = load_raw()
-#     X_train, X_test, y_train, y_test = chronological_split(X, y)
-
-#     _setup_mlflow()
-#     results: dict[str, dict] = {}
-
-#     for name, model in make_models().items():
-#         pipe = build_pipeline(model)
-#         with mlflow.start_run(run_name=name):
-#             _log_params(model)
-
-#             pipe.fit(X_train, y_train)
-#             proba = pipe.predict_proba(X_test)[:, 1]
-
-#             metrics = compute_metrics(y_test, proba, settings.decision_threshold)
-#             mlflow.log_metrics(metrics)
-
-#             kwargs = {}
-#             if register:
-#                 kwargs["registered_model_name"] = settings.registered_model_name
-            
-#             mlflow.sklearn.log_model(
-#                 pipe,
-#                 artifact_path="model",
-#                 serialization_format="cloudpickle",
-#                 **kwargs,
-#             )
-
-#             results[name] = metrics
-#             print(f"[{name}] " + "  ".join(f"{k}={v:.4f}" for k, v in metrics.items()))
-    
-#     return results
 
 def train_all(register: bool = False) -> dict:
-    
+    configure_mlflow()  # auth (ถ้าจำเป็น) + tracking uri + experiment
+
     X, y = load_raw()
     X_train, X_test, y_train, y_test = chronological_split(X, y)
-
-    _setup_mlflow()
-    results: dict[str, dict] = {}
     lineage_tags = {"git_sha": _git_sha(), "data_hash": data_fingerprint()}
 
     results: dict[str, dict] = {}

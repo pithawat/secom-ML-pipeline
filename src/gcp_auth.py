@@ -66,7 +66,7 @@ def ensure_mlflow_auth() -> None:
      if have_token and time.time() - _token_minted_at < _REFRESH_AFTER_SEC:
         return  # token ที่ mint เองยังไม่ใกล้หมดอายุ
      
-     token = _token_from_metadata(audience=settings.mlflow.uri)
+     token = _token_from_metadata(audience=settings.mlflow_uri)
      if token:
          os.environ["MLFLOW_TRACKING_TOKEN"] =token
          _token_minted_at = time.time()
