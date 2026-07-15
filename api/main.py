@@ -22,6 +22,7 @@ import mlflow.sklearn
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.config import settings
@@ -49,6 +50,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SECOM fault detection API", lifespan=lifespan)
+
+# CORS: ให้หน้า test UI (เปิดจากไฟล์ local / โดเมนอื่น) ยิง /predict ได้
+# ไม่งั้น browser บล็อก cross-origin. เดโม/งานเรียนใช้ "*" ได้ — งานจริงล็อกเป็น origin ที่รู้จัก
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["POST", "GET", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 
 class PredictRequest(BaseModel):
