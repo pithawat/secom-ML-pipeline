@@ -126,9 +126,7 @@ jobs:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.DEPLOYER_SA }}
           token_format: id_token
-          # Cloud Run ต้องการ aud ที่มี trailing slash เป๊ะ ไม่งั้นได้ 401
-          # "Invalid JWT audience" แม้ MLFLOW_URL จะตรงกับ service URL ทุกตัวอักษร
-          id_token_audience: ${{ vars.MLFLOW_URL }}/
+          id_token_audience: ${{ vars.MLFLOW_URL }}
           id_token_include_email: true
       - run: echo "MLFLOW_TRACKING_TOKEN=${{ steps.mlflow-auth.outputs.id_token }}" >> "$GITHUB_ENV"
 
@@ -166,9 +164,7 @@ jobs:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.DEPLOYER_SA }}
           token_format: id_token
-          # Cloud Run ต้องการ aud ที่มี trailing slash เป๊ะ ไม่งั้นได้ 401
-          # "Invalid JWT audience" แม้ MLFLOW_URL จะตรงกับ service URL ทุกตัวอักษร
-          id_token_audience: ${{ vars.MLFLOW_URL }}/
+          id_token_audience: ${{ vars.MLFLOW_URL }}
           id_token_include_email: true
       - run: echo "MLFLOW_TRACKING_TOKEN=${{ steps.mlflow-auth.outputs.id_token }}" >> "$GITHUB_ENV"
 
@@ -200,9 +196,7 @@ jobs:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.DEPLOYER_SA }}
           token_format: id_token
-          # Cloud Run ต้องการ aud ที่มี trailing slash เป๊ะ ไม่งั้นได้ 401
-          # "Invalid JWT audience" แม้ MLFLOW_URL จะตรงกับ service URL ทุกตัวอักษร
-          id_token_audience: ${{ vars.MLFLOW_URL }}/
+          id_token_audience: ${{ vars.MLFLOW_URL }}
           id_token_include_email: true
       - run: echo "MLFLOW_TRACKING_TOKEN=${{ steps.mlflow-auth.outputs.id_token }}" >> "$GITHUB_ENV"
 

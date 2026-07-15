@@ -22,9 +22,9 @@ import requests
 import mlflow
 from src.config import settings
 
-_METADATA_URL = (
+_METADATA_IDENTITY_URL = (
     "http://metadata.google.internal/computeMetadata/v1/"
-    "instance/service-accounts/default/identity?audience={audience}"
+    "instance/service-accounts/default/identity"
 )
 
 _REFRESH_AFTER_SEC = 50 * 60  # ID token อายุ 60 นาที — ต่ออายุก่อนหมดที่ ~50 นาที
@@ -36,18 +36,43 @@ def _is_local(uri: str) -> bool:
     host = urllib.parse.urlparse(uri).hostname
     return host in ("127.0.0.1", "localhost")
 
+def _decode_jwt_claims(token: str) -> dict | None:
+    """decode payload ของ JWT (ไม่ verify signature) — ใช้ debug ว่า aud/email ที่ metadata
+    คืนมาตรงกับที่ Cloud Run คาดหวังจริงไหม. คืน None ถ้า token ไม่ใช่ JWT 3 ส่วน."""
+    import base64
+    import json
+
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    payload = parts[1] + "=" * (-len(parts[1]) % 4)  # เติม padding ให้ base64 ครบ
+    try:
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return None
+
+
 def _token_from_metadata(audience: str) -> str | None:
-    print(f"[gcp_auth] minting ID token: audience={audience!r}")  # เผื่อมี \n/space แอบมากับ env
+    print(f"[gcp_auth] requesting ID token for audience={audience!r}")
     try:
         r = requests.get(
-            _METADATA_URL.format(audience=urllib.parse.quote(audience, safe="")),
+            _METADATA_IDENTITY_URL,
+            params={"audience": audience},  # ให้ requests encode ครั้งเดียว ถูกต้องเสมอ
             headers={"Metadata-Flavor": "Google"},
             timeout=3,
         )
         r.raise_for_status()
-        return r.text
     except requests.RequestException:
-        return None
+        return None  # ไม่ได้รันบน GCP (เช่น เครื่อง dev) — ให้ชั้นถัดไปตัดสินใจ
+
+    token = r.text.strip()  # กัน newline/space แฝง ที่ทำให้ Bearer header เพี้ยน → "Invalid bearer token"
+    claims = _decode_jwt_claims(token)
+    if claims is None:
+        print(f"[gcp_auth] ⚠ metadata ไม่ได้คืน JWT! len={len(token)} head={token[:48]!r}")
+    else:
+        print(f"[gcp_auth] token claims: aud={claims.get('aud')!r} "
+              f"email={claims.get('email')!r} iss={claims.get('iss')!r}")
+    return token
     
 def ensure_mlflow_auth() -> None:
      """เตรียม MLFLOW_TRACKING_TOKEN ให้พร้อมใช้ — เรียกซ้ำได้เรื่อย ๆ (idempotent)
@@ -67,11 +92,9 @@ def ensure_mlflow_auth() -> None:
      if have_token and time.time() - _token_minted_at < _REFRESH_AFTER_SEC:
         return  # token ที่ mint เองยังไม่ใกล้หมดอายุ
      
-     # Cloud Run ต้องการ aud ที่มี trailing slash เป๊ะ (ดู docs.cloud.google.com/run/docs/authenticating/service-to-service)
-     # ไม่งั้นได้ 401 "Invalid JWT audience" แม้ audience จะตรงกับ service URL ทุกตัวอักษร
-     # ใส่ / เฉพาะตอน mint token เท่านั้น — settings.mlflow_uri เองไม่แตะ (ใช้เป็น tracking URI ที่อื่นอยู่)
-     audience = settings.mlflow_uri.rstrip("/") + "/"
-     token = _token_from_metadata(audience=audience)
+     # audience = service URL แบบไม่มี trailing slash (ตามหลักฐานจริงจากการทดสอบ curl มือ
+     # ด้วย impersonation ที่ผ่าน audience check ได้) — decode ด้านบนจะยืนยัน aud จริงให้เห็น
+     token = _token_from_metadata(audience=settings.mlflow_uri)
      if token:
          os.environ["MLFLOW_TRACKING_TOKEN"] =token
          _token_minted_at = time.time()
