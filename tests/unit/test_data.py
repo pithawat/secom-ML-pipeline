@@ -1,5 +1,4 @@
 """ทดสอบ data loader ด้วยไฟล์สังเคราะห์ใน tmp_path — ไม่พึ่ง dataset จริง/เน็ต"""
-import pandas as pd
 import pytest
 
 from src.data import chronological_split, load_raw
