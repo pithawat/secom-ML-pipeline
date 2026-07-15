@@ -814,7 +814,11 @@ def ensure_mlflow_auth() -> None:
     if have_token and time.time() - _token_minted_at < _REFRESH_AFTER_SEC:
         return  # token ที่ mint เองยังไม่ใกล้หมดอายุ
 
-    token = _token_from_metadata(audience=settings.mlflow_uri)
+    # Cloud Run ต้องการ aud ที่มี trailing slash เป๊ะ (ดู docs.cloud.google.com/run/docs/authenticating/service-to-service)
+    # ไม่งั้นได้ 401 "Invalid JWT audience" แม้ audience จะตรงกับ service URL ทุกตัวอักษร
+    # ใส่ / เฉพาะตอน mint token เท่านั้น — settings.mlflow_uri เองไม่แตะ (ใช้เป็น tracking URI ที่อื่นอยู่)
+    audience = settings.mlflow_uri.rstrip("/") + "/"
+    token = _token_from_metadata(audience=audience)
     if token:
         os.environ["MLFLOW_TRACKING_TOKEN"] = token
         _token_minted_at = time.time()
@@ -1691,7 +1695,9 @@ jobs:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.DEPLOYER_SA }}
           token_format: id_token
-          id_token_audience: ${{ vars.MLFLOW_URL }}
+          # Cloud Run ต้องการ aud ที่มี trailing slash เป๊ะ ไม่งั้นได้ 401
+          # "Invalid JWT audience" แม้ MLFLOW_URL จะตรงกับ service URL ทุกตัวอักษร
+          id_token_audience: ${{ vars.MLFLOW_URL }}/
           id_token_include_email: true
       - run: echo "MLFLOW_TRACKING_TOKEN=${{ steps.mlflow-auth.outputs.id_token }}" >> "$GITHUB_ENV"
 
@@ -1729,7 +1735,9 @@ jobs:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.DEPLOYER_SA }}
           token_format: id_token
-          id_token_audience: ${{ vars.MLFLOW_URL }}
+          # Cloud Run ต้องการ aud ที่มี trailing slash เป๊ะ ไม่งั้นได้ 401
+          # "Invalid JWT audience" แม้ MLFLOW_URL จะตรงกับ service URL ทุกตัวอักษร
+          id_token_audience: ${{ vars.MLFLOW_URL }}/
           id_token_include_email: true
       - run: echo "MLFLOW_TRACKING_TOKEN=${{ steps.mlflow-auth.outputs.id_token }}" >> "$GITHUB_ENV"
 
@@ -1761,7 +1769,9 @@ jobs:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.DEPLOYER_SA }}
           token_format: id_token
-          id_token_audience: ${{ vars.MLFLOW_URL }}
+          # Cloud Run ต้องการ aud ที่มี trailing slash เป๊ะ ไม่งั้นได้ 401
+          # "Invalid JWT audience" แม้ MLFLOW_URL จะตรงกับ service URL ทุกตัวอักษร
+          id_token_audience: ${{ vars.MLFLOW_URL }}/
           id_token_include_email: true
       - run: echo "MLFLOW_TRACKING_TOKEN=${{ steps.mlflow-auth.outputs.id_token }}" >> "$GITHUB_ENV"
 
@@ -2091,6 +2101,7 @@ pytest -m "not gate"
 |---|---|
 | `pip install -r requirements.txt` ใน Docker ล้มด้วย error แปลก ๆ (invalid requirement, null bytes) | ไฟล์เป็น UTF-16 — ต้องเขียน requirements ใหม่เป็น UTF-8 (§4.1) |
 | MLflow ตอบ **401/403** | (1) SA ที่เรียกยังไม่ได้ `roles/run.invoker` บน `secom-mlflow` (2) token audience ไม่ตรงกับ URL ของ service (3) token หมดอายุ (>1 ชม.) — `ensure_mlflow_auth()` ต่ออายุให้เฉพาะบน GCP; บนเครื่องต้อง mint ใหม่เอง |
+| **`Invalid IAP credentials: Invalid bearer token. Invalid JWT audience.`** | audience ของ ID token ต้องมี **trailing slash** เป๊ะ (`https://service.run.app/`) ตาม [Cloud Run docs](https://docs.cloud.google.com/run/docs/authenticating/service-to-service) — แม้ audience จะ "ดูเหมือน" ตรงกับ service URL ทุกตัวอักษร (เทียบด้วยตาแล้วเหมือนกัน) แต่ถ้าไม่มี `/` ท้ายจะโดนปฏิเสธเงียบ ๆ ด้วย error นี้เสมอ แก้แล้วใน `gcp_auth.py` (`.rstrip("/") + "/"`) และ workflow (`id_token_audience: ${{ vars.MLFLOW_URL }}/`) — ถ้าเพิ่ม auth pathใหม่ที่ไหนอย่าลืม trailing slash ด้วย |
 | **`Invalid Host header - possible DNS rebinding attack detected`** | MLflow 3.x เปิด DNS-rebinding protection รับแค่ `localhost`/private-IP เป็น default → โดเมน `run.app` โดนปฏิเสธ (กระทบทั้ง UI **และทุก REST call จากไปป์ไลน์**) แก้: entrypoint ใส่ `--allowed-hosts` ให้แล้ว (§5.8); ถ้า service เก่ายังไม่มี ให้ hotfix ทันทีไม่ต้อง rebuild: `gcloud run services update secom-mlflow --region $REGION --update-env-vars '^@^MLFLOW_SERVER_ALLOWED_HOSTS=*.run.app,localhost,localhost:*,127.0.0.1'` |
 | container fail to start ครั้งแรก ๆ แล้วมาสำเร็จตอน retry | ปกติของ first deploy: MLflow รัน DB migration บน Cloud SQL ที่เพิ่งตื่น อาจเกิน startup timeout — retry แล้วขึ้นเองได้ ถ้าเจอซ้ำ ๆ เพิ่ม `--timeout=600` ตอน deploy |
 | โหลดโมเดลแล้ว `ModuleNotFoundError: No module named 'src'` (หรือ `preprocess`) | pickle อ้าง module path ตอนเทรน — ต้องเทรนด้วย `python -m src.train` จาก root เสมอ (ห้าม `cd src`) และ image ที่โหลดโมเดลต้องมี `src/` (§4 หัวข้อเตือน) |

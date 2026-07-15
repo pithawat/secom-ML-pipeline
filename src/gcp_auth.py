@@ -67,7 +67,11 @@ def ensure_mlflow_auth() -> None:
      if have_token and time.time() - _token_minted_at < _REFRESH_AFTER_SEC:
         return  # token ที่ mint เองยังไม่ใกล้หมดอายุ
      
-     token = _token_from_metadata(audience=settings.mlflow_uri)
+     # Cloud Run ต้องการ aud ที่มี trailing slash เป๊ะ (ดู docs.cloud.google.com/run/docs/authenticating/service-to-service)
+     # ไม่งั้นได้ 401 "Invalid JWT audience" แม้ audience จะตรงกับ service URL ทุกตัวอักษร
+     # ใส่ / เฉพาะตอน mint token เท่านั้น — settings.mlflow_uri เองไม่แตะ (ใช้เป็น tracking URI ที่อื่นอยู่)
+     audience = settings.mlflow_uri.rstrip("/") + "/"
+     token = _token_from_metadata(audience=audience)
      if token:
          os.environ["MLFLOW_TRACKING_TOKEN"] =token
          _token_minted_at = time.time()
