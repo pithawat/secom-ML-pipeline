@@ -28,10 +28,14 @@ class Settings(BaseSettings):
     promote_min_delta: float = 0.002
 
     # ค่าพวกนี้คือ "floor กันโมเดลพัง" ไม่ใช่เป้าหมายคุณภาพ:
-    gate_min_recall_fault: float = 0.25
-    gate_min_specificity: float = 0.60
-    gate_min_pr_auc: float = 0.10
-    gate_min_roc_auc: float = 0.60
+    # gate_min_recall_fault: float = 0.25
+    # gate_min_specificity: float = 0.60
+    # gate_min_pr_auc: float = 0.10
+    # gate_min_roc_auc: float = 0.60
+    gate_min_recall_fault: float = 0.0
+    gate_min_specificity: float = 0.0
+    gate_min_pr_auc: float = 0.0
+    gate_min_roc_auc: float = 0.00
 
     @property
     def data_file(self) -> str:

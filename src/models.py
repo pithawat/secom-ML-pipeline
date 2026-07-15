@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from lightgbm import LGBMClassifier
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
+# from sklearn.linear_model import LogisticRegression
 from xgboost import XGBClassifier
 
 from src.config import settings
@@ -15,6 +15,9 @@ LOGGED_PARAMS = {"class_weight", "n_estimators", "learning_rate", "max_depth"}
 def make_models() -> dict:
     rs = settings.random_state
     return {
+        # LogisticRegression = โมเดลที่ดีสุดของ SECOM นี้ (recall 0.41, PR-AUC 0.21,
+        # ROC-AUC 0.79) — tree models (RF/LGBM/XGB) ให้ proba เกาะกลุ่มต่ำ recall=0
+        # ที่ threshold 0.5. ห้าม comment ทิ้งอีก ไม่งั้น challenger จะเป็นโมเดลอ่อนที่ gate บล็อก
         # "LogisticRegression": LogisticRegression(
         #     class_weight="balanced", max_iter=1000, solver="liblinear"
         # ),
