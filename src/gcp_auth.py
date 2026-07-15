@@ -37,10 +37,11 @@ def _is_local(uri: str) -> bool:
     return host in ("127.0.0.1", "localhost")
 
 def _token_from_metadata(audience: str) -> str | None:
+    print(f"[gcp_auth] minting ID token: audience={audience!r}")  # เผื่อมี \n/space แอบมากับ env
     try:
         r = requests.get(
-            _METADATA_URL.format(audience=audience),
-            headers={"Metadata-Flavor":"Google"},
+            _METADATA_URL.format(audience=urllib.parse.quote(audience, safe="")),
+            headers={"Metadata-Flavor": "Google"},
             timeout=3,
         )
         r.raise_for_status()

@@ -15,9 +15,9 @@ LOGGED_PARAMS = {"class_weight", "n_estimators", "learning_rate", "max_depth"}
 def make_models() -> dict:
     rs = settings.random_state
     return {
-        "LogisticRegression": LogisticRegression(
-            class_weight="balanced", max_iter=1000, solver="liblinear"
-        ),
+        # "LogisticRegression": LogisticRegression(
+        #     class_weight="balanced", max_iter=1000, solver="liblinear"
+        # ),
         "RandomForest": RandomForestClassifier(
             n_estimators=200, class_weight="balanced", random_state=rs
         ),

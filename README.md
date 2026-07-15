@@ -784,9 +784,10 @@ def _is_local(uri: str) -> bool:
 
 
 def _token_from_metadata(audience: str) -> str | None:
+    print(f"[gcp_auth] minting ID token: audience={audience!r}")  # เผื่อมี \n/space แอบมากับ env
     try:
         r = requests.get(
-            _METADATA_URL.format(audience=audience),
+            _METADATA_URL.format(audience=urllib.parse.quote(audience, safe="")),
             headers={"Metadata-Flavor": "Google"},
             timeout=3,
         )
